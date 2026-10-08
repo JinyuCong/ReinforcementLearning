@@ -6,8 +6,30 @@ import numpy as np
 
 
 def state_to_index(state, env_size):
+    '''
+
+    :param state:
+    :param env_size:
+    :return:
+    '''
     x, y = state
     return x + y * env_size[0]
+
+def one_hot(indices: np.ndarray, total_dim: int):
+    '''
+    给一个1维的向量做one hot
+    :param indices: 下标向量
+    :param total_dim: 第二维总维度
+    :return: one hot 矩阵
+    '''
+    n = indices.shape[0]
+    one_hot_matrix = np.zeros((n, total_dim))
+
+    for i in range(n):
+        one_hot_matrix[i, indices[i]] = 1
+
+    return one_hot_matrix
+
 
 
 def generate_episode(env, policy_matrix):

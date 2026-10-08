@@ -4,7 +4,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 from src.grid_world import GridWorld
-from monte_carlo.utils import state_to_index, generate_episode
+from monte_carlo.utils import state_to_index, generate_episode, one_hot
 
 env = GridWorld()
 
@@ -25,38 +25,33 @@ env = GridWorld()
 #   policy_matrix   : 当前策略，改进后每行是 one-hot（确定性贪心）
 # ================================================================
 
-def mc_basic(env, num_iterations=20, num_episodes=1000, gamma=0.9):
+def mc_basic(env, num_iterations=1,
+             num_episodes=1000, gamma=0.9):
     num_states = env.num_states
     num_actions = len(env.action_space)
 
-    # Q(s,a)：动作价值估计，初始全 0
-    Q = np.zeros((num_states, num_actions))
-    
-    # 累积回报之和 & 访问次数，用于增量计算 Q 的均值
+    Q = None
     returns_sum = np.zeros((num_states, num_actions))
     counts = np.zeros((num_states, num_actions))
-    
-    # 初始策略：均匀随机
     policy_matrix = np.ones((num_states, num_actions)) / num_actions
 
-    for ep in range(num_episodes):
-        episode = generate_episode(env, policy_matrix)
-        G = 0
-        for state_idx, action_index, reward in reversed(episode):
-            G = reward + gamma * G
-            returns_sum[state_idx, action_index] += G
-            counts[state_idx, action_index] += 1
-            Q[state_idx, action_index] = returns_sum[state_idx, action_index] / counts[state_idx, action_index]
+    for it in range(num_iterations):
+        for ep in range(num_episodes):
+            episode = generate_episode(env, policy_matrix)
+            G = 0
+            for (state_index, action_index, reward) in reversed(episode):
+                G += reward + gamma * G
+                returns_sum[state_index, action_index] += G
+                counts[state_index, action_index] += 1
 
-            best_action = np.argmax(Q[state_idx])
-            policy_matrix[state_idx] = np.zeros(num_actions)
-            policy_matrix[state_idx, best_action] = 1
+            Q = returns_sum / (counts + 1e-8)
+            best_action_indices = Q.argmax(axis=-1)
+            policy_matrix = one_hot(best_action_indices, total_dim=num_actions)
 
-    return Q, policy_matrix
-
+    return policy_matrix, Q
 
 if __name__ == "__main__":
-    Q, best_policy = mc_basic(env)
+    best_policy, Q = mc_basic(env)
 
     state, _ = env.reset()
     env.render()

@@ -6,7 +6,7 @@ import numpy as np
 from src.grid_world import GridWorld
 from td.utils import state_to_index, epsilon_greedy
 
-env = GridWorld()
+env: GridWorld = GridWorld()
 
 # ================================================================
 # Sarsa —— On-Policy TD Control
@@ -49,11 +49,11 @@ def sarsa(env, num_episodes=5000, alpha=0.1, gamma=0.9, epsilon_start=1.0, epsil
         
         #  起始state
         state, _ = env.reset()
-        state_idx = state_to_index(state, env.env_size)
+        state_idx = state_to_index(state, env_size=env.env_size)
         
         # 用 ε-greedy 在 s 上选 a
-        state_action_probs = epsilon_greedy(epsilon, Q, policy_matrix, state_idx)
-        action_idx = np.random.choice(num_actions, p=state_action_probs)
+        action_probs = epsilon_greedy(epsilon, Q, policy_matrix, state_idx)
+        action_idx = np.random.choice(num_actions, p=action_probs)
         action = env.action_space[action_idx]
         
         done = False
@@ -61,22 +61,23 @@ def sarsa(env, num_episodes=5000, alpha=0.1, gamma=0.9, epsilon_start=1.0, epsil
         while not done and step < 200:
             # 执行 a，得到 r, s'
             next_state, reward, done, _ = env.step(action)
-            next_state_idx = state_to_index(next_state, env.env_size)
-            state_action_probs = epsilon_greedy(epsilon, Q, policy_matrix, next_state_idx)
+            next_state_idx = state_to_index(next_state, env_size=env.env_size)
             
             # 用 ε-greedy 在 s' 上选 a'
-            next_action_idx = np.random.choice(num_actions, p=state_action_probs)
+            action_probs = epsilon_greedy(epsilon, Q, policy_matrix, next_state_idx)
+            next_action_idx = np.random.choice(num_actions, p=action_probs)
             
             # 更新Q
-            Q[state_idx, action_idx] -= alpha * (Q[state_idx, action_idx] - (reward + gamma * Q[next_state_idx, next_action_idx]))
+            Q[state_idx, action_idx] += alpha * (reward + gamma * Q[next_state_idx, next_action_idx] - Q[state_idx, action_idx])
             
             # 用 ε-greedy 更新 policy_matrix[s]
             policy_matrix[state_idx] = epsilon_greedy(epsilon, Q, policy_matrix, state_idx)
             
-            state_idx, action_idx = next_state_idx, next_action_idx
+            state_idx = next_state_idx
+            action_idx = next_action_idx
             action = env.action_space[action_idx]
             step += 1
-        
+            
     return Q, policy_matrix
 
 

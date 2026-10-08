@@ -55,68 +55,61 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # ================================================================
 
 
-def actor_critic(env, num_episodes=2000, lr_actor=1e-3, lr_critic=1e-3, gamma=0.99):
+def actor_critic(env, num_episodes=2000,
+                 lr_actor=1e-3, lr_critic=1e-3, gamma=0.99):
+    num_actions = env.action_space.n
     state_dim = env.observation_space.shape[0]
-    num_actions = int(env.action_space.n)
-    
+
     actor_net = LinearActor(state_dim, num_actions).to(device)
     critic_net = LinearCritic(state_dim).to(device)
-    actor_optimizer = torch.optim.Adam(actor_net.parameters(), lr=lr_actor)
-    critic_optimizer = torch.optim.Adam(critic_net.parameters(), lr=lr_critic)
-    
+    actor_optim = torch.optim.Adam(actor_net.parameters(), lr=lr_actor)
+    critic_optim = torch.optim.Adam(critic_net.parameters(), lr=lr_critic)
+
     for ep in range(num_episodes):
-        state, _ = env.reset()  # state : (4,)
-        
+        state, _ = env.reset()
+
         done = False
         ep_step = 0
         ep_actor_loss = 0
         ep_critic_loss = 0
-
         while not done:
-            # a ~ π(·|s; θ_π)
-            state_t = torch.FloatTensor(state).unsqueeze(0).to(device)  # (1, 4)
-            log_probs = actor_net(state_t)  # (1, num_actions)
+            state_t = torch.FloatTensor(state).unsqueeze(0).to(device)
+            state_value = critic_net(state_t)
 
-            action = torch.multinomial(log_probs.exp(), 1).item()
-            log_action_p = log_probs[0, action]  # π(a|s, θ_π)
-            
-            # s', r, done = env.step(a)
-            next_state, reward, terminated, truncated, _ = env.step(action)  # next_state : (1, 4)
+            log_probs = actor_net(state_t)
+            action_probs = torch.exp(log_probs)
+            action = torch.multinomial(action_probs, 1).item()
+            log_action_p = log_probs[0, action]
+
+            next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-            
-            next_state_t = torch.FloatTensor(next_state).unsqueeze(0).to(device)  # (1, 4)
-            
-            # δ = r + γ·V(s') - V(s)   （done 时 V(s')=0）
-            state_value = critic_net(state_t).squeeze()  # V(s)
-            next_state_value = critic_net(next_state_t).squeeze() if not done else torch.tensor(0.0).to(device)  # V(s')
-            delta = reward + gamma * next_state_value - state_value
-            
-            loss_critic = delta ** 2 
-            loss_actor = -delta.detach() * log_action_p
-            ep_actor_loss += loss_actor
-            ep_critic_loss += loss_critic
-            
-            # 反向传播 θ_π
-            actor_optimizer.zero_grad()
-            loss_actor.backward()
-            # torch.nn.utils.clip_grad_norm_(actor_net.parameters(), max_norm=1.0)
-            actor_optimizer.step()
-            
-            # 反向传播 θ_v
-            critic_optimizer.zero_grad()
-            loss_critic.backward()
-            # torch.nn.utils.clip_grad_norm_(critic_net.parameters(), max_norm=1.0)
-            critic_optimizer.step()
-            
+
+            next_state_t = torch.FloatTensor(next_state).unsqueeze(0).to(device)
+            next_state_value = critic_net(next_state_t)
+            delta = reward + gamma * next_state_value * (1 - done) - state_value
+
+            critic_loss = delta ** 2
+            actor_loss = -delta.detach() * log_action_p
+            ep_actor_loss += actor_loss
+            ep_critic_loss += critic_loss
+
+            actor_optim.zero_grad()
+            actor_loss.backward()
+            torch.nn.utils.clip_grad_norm_(actor_net.parameters(), max_norm=1.0)
+            actor_optim.step()
+
+            critic_optim.zero_grad()
+            critic_loss.backward()
+            torch.nn.utils.clip_grad_norm_(critic_net.parameters(), max_norm=1.0)
+            critic_optim.step()
+
             state = next_state
-            
             ep_step += 1
-        
-        print(f"Episode {ep+1} | Actor loss : {ep_actor_loss.item()/ep_step:.3f} | Critic loss : {ep_critic_loss.item()/ep_step:.3f}")
-        
+        print(f"Episode {ep + 1} | "
+              f"actor loss: {ep_actor_loss.item() / ep_step:.3f} | "
+              f"critic loss: {ep_critic_loss.item() / ep_step:.3f}")
+
     return actor_net
-            
-            
 
 if __name__ == "__main__":
     actor = actor_critic(env, num_episodes=2000)

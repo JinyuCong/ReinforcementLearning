@@ -8,7 +8,6 @@ import matplotlib.patches as patches
 from examples.arguments import args           
 
 class GridWorld():
-
     def __init__(self, env_size=args.env_size, 
                  start_state=args.start_state, 
                  target_state=args.target_state, 
@@ -134,10 +133,8 @@ class GridWorld():
         plt.draw()
         plt.pause(animation_interval)
         if args.debug:
-            input('press Enter to continue...')     
+            input('press Enter to continue...')
 
-
- 
     def add_policy(self, policy_matrix):                  
         for state, state_action_group in enumerate(policy_matrix):    
             x = state % self.env_size[0]
@@ -149,7 +146,7 @@ class GridWorld():
                         self.ax.add_patch(patches.FancyArrow(x, y, dx=(0.1+action_probability/2)*dx, dy=(0.1+action_probability/2)*dy, color=self.color_policy, width=0.001, head_width=0.05))
                     else:
                         self.ax.add_patch(patches.Circle((x, y), radius=0.07, facecolor=self.color_policy, edgecolor=self.color_policy, linewidth=1, fill=False))
-    
+
     def add_state_values(self, values, precision=1):
         '''
             values: iterable

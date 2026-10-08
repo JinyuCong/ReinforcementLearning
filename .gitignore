@@ -1,5 +1,5 @@
 # Python
-__pycache__/
+*/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
@@ -8,6 +8,7 @@ __pycache__/
 dist/
 build/
 *.egg
+examples/__pycache__/
 
 # Virtual environments
 .venv/

@@ -58,115 +58,105 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     
 class UpdateDataset(Dataset):
-    def __init__(self, collection, returns, advantages):
+    def __init__(self, buffer):
         super().__init__()
-        self.collection = collection
-        self.returns = returns
-        self.advantages = advantages
+        self.buffer = buffer
         
     def __len__(self):
-        return len(self.collection)
+        return len(self.buffer)
 
     def __getitem__(self, index):
         return {
-            'state': self.collection[index][0],
-            'action': self.collection[index][1],
-            'reward': self.collection[index][2],
-            'done': self.collection[index][3],
-            'log_action_p': self.collection[index][4],
-            'state_value': self.collection[index][5],
-            'G': self.returns[index],
-            'A': self.advantages[index]
+            'state': self.buffer[index][0],
+            'action': self.buffer[index][1],
+            'reward': self.buffer[index][2],
+            'done': self.buffer[index][3],
+            'log_action_p': self.buffer[index][4],
+            'state_value': self.buffer[index][5],
+            'G': self.buffer[index][6],
+            'A': self.buffer[index][7]
         }
 
 
 def ppo(env, num_updates=500, steps_per_update=256,
         lr=3e-4, gamma=0.99, clip_eps=0.2,
         ppo_epochs=4, batch_size=64, value_coef=0.5):
+    num_actions = env.action_space.n
     state_dim = env.observation_space.shape[0]
-    num_actions = int(env.action_space.n)
-    
+
     actor_net = LinearActor(state_dim, num_actions).to(device)
     critic_net = LinearCritic(state_dim).to(device)
-    actor_optimizer = torch.optim.Adam(actor_net.parameters(), lr=lr)
-    critic_optimizer = torch.optim.Adam(critic_net.parameters(), lr=lr)
-    
+    actor_optim = torch.optim.Adam(actor_net.parameters(), lr=lr)
+    critic_optim = torch.optim.Adam(critic_net.parameters(), lr=lr)
+
     state, _ = env.reset()
-    
+
     for update in range(num_updates):
-        collection = []  # 用来储存 (s, a, r, done, log_prob_old, V(s))
+        buffer = []
+
+        # 用旧策略 π_old 收集 steps_per_update 步数据
         for step in range(steps_per_update):
             state_t = torch.FloatTensor(state).unsqueeze(0).to(device)
             with torch.no_grad():
-                log_probs = actor_net(state_t)       # (1, num_actions)
-                state_value = critic_net(state_t)    # V(s)
+                state_value = critic_net(state_t)
+                log_probs = actor_net(state_t)
 
-            action = torch.multinomial(log_probs.exp(), 1).item()
+            action_probs = torch.exp(log_probs)
+            action = torch.multinomial(action_probs, 1).item()
             log_action_p = log_probs[0, action]
 
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
-            
-            # 存储 (s, a, r, done, log_prob_old, V(s))
-            collection.append((state_t.squeeze(0), action, reward, done, log_action_p, state_value.squeeze(0)))
-            
+
+            buffer.append((state_t.squeeze(0), action, reward, done, log_action_p.squeeze(0), state_value))
             state = next_state
-            # 当到达终点后重置env
+
             if done:
                 state, _ = env.reset()
-         
-        # 计算每步的优势 A_t 和 return G_t
+
         G = 0
-        returns = []
-        for _, _, reward, done, _, _ in reversed(collection):
+        # 将TD target和advantage添加到buffer每个元素的末尾
+        # 这时变为(s, a, r, done, log_prob_old, V(s), G, A)
+        for i, (_, _, reward, done, _, state_value) in enumerate(reversed(buffer)):
             G = reward + gamma * G * (1 - done)
-            returns.insert(0, G)
-        
-        advantages = []
-        for (_, _, _, _, _, state_value), G in zip(collection, returns):
-            A = G - state_value.detach().squeeze().item()
-            advantages.append(A)
-        
-        advantages = torch.FloatTensor(advantages)
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-        returns = torch.FloatTensor(returns)
-            
-        dataset = UpdateDataset(collection, returns, advantages)
-        dataloader = DataLoader(dataset, batch_size=batch_size)
-        
+            advantage = G - state_value.detach().item()
+            buffer[len(buffer) - i - 1] += (G, advantage)
+
+        buffer_dataset = UpdateDataset(buffer)
+        buffer_loader = DataLoader(buffer_dataset, batch_size=batch_size, shuffle=False)
+
         update_loss = 0
         for epoch in range(ppo_epochs):
-            for batch in dataloader:
-                s      = batch['state'].to(device)
-                action = batch['action'].reshape(-1, 1).to(device)
-                log_pi_old = batch['log_action_p'].reshape(-1, 1).to(device)
-                G = batch['G'].reshape(-1, 1).to(device)
-                A = batch['A'].reshape(-1, 1).to(device)
+            for batch in buffer_loader:
+                state_t = batch["state"].to(device)
+                action = batch["action"].view(-1, 1).to(device)
+                log_prob_old = batch["log_action_p"].view(-1, 1).to(device)
+                G = batch["G"].view(-1, 1).to(device)
+                advantage = batch["A"].view(-1, 1).to(device)
 
-                log_probs: torch.FloatTensor = actor_net(s)
-                log_pi_new = log_probs.gather(1, action)
-                # r_t = exp(log_π_new(a|s) - log_π_old(a|s))
-                ratio = torch.exp(log_pi_new - log_pi_old)  # (batch, 1)
-                L_clip = torch.min(ratio * A, torch.clamp(ratio, 1-clip_eps, 1+clip_eps) * A).mean()
+                advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
-                V_new = critic_net(s)
-                L_value = ((V_new - G) ** 2).mean()
-                
-                loss = -L_clip + value_coef * L_value
-                
-                actor_optimizer.zero_grad()
-                critic_optimizer.zero_grad()
-                loss.backward()
-                actor_optimizer.step()
-                critic_optimizer.step()
-                
-                update_loss += loss.item()
-        
-        update_loss /= (ppo_epochs * len(dataloader))
-        print(f"Update {update+1} | Mean loss : {update_loss}")
-                
+                new_log_probs = actor_net(state_t)
+                log_prob_new = new_log_probs.gather(1, action)
+                ratio = torch.exp(log_prob_new - log_prob_old)
+
+                clip_loss = torch.min(ratio * advantage, torch.clamp(ratio, 1 - clip_eps, 1 + clip_eps) * advantage).mean()
+                V_new = critic_net(state_t)
+                value_loss = ((V_new - G) ** 2).mean()
+
+                all_loss = -clip_loss + value_coef * value_loss
+
+                actor_optim.zero_grad()
+                critic_optim.zero_grad()
+                all_loss.backward()
+                actor_optim.step()
+                critic_optim.step()
+
+                update_loss += all_loss.item()
+
+        update_loss /= (ppo_epochs * len(buffer_loader))
+        print(f"Update {update + 1} | Mean loss : {update_loss}")
+
     return actor_net
-            
-
 if __name__ == "__main__":
     actor = ppo(env, num_updates=500, steps_per_update=256)

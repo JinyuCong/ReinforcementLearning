@@ -61,39 +61,37 @@ def td_zero_fa(env, num_episodes=500, alpha=0.01, gamma=0.9):
 
     for ep in range(num_episodes):
         state, _ = env.reset()
-
-        phi = get_features(state, env.env_size)
-
-        # 记录mean state value
-        episode_state_value = 0
-
+        state_idx = state_to_index(state, env_size=env.env_size)
+        phi = get_features(state, env_size=env.env_size)
+        
         done = False
         step = 0
+        # 记录mean state value
+        all_state_value = 0
         while not done and step < 200:
-            state_idx = state_to_index(state, env.env_size)
-            state = index_to_state(state_idx, env.env_size)
-
+            pred_state_value = phi @ w
+            # 随机选择一个action
             action_idx = np.random.choice(num_actions, p=policy_matrix[state_idx])
             action = env.action_space[action_idx]
-
+            # 采取action走到下一个state
             next_state, reward, done, _ = env.step(action)
-            next_phi = get_features(next_state, env.env_size)
-            delta = reward + gamma * (1 - done) * (next_phi @ w) - (phi @ w)
-
+            # 提取下一个state的特征
+            next_phi = get_features(next_state, env_size=env.env_size)
+            # 计算下一个state的state value
+            pred_next_state_value = next_phi @ w
+            # 计算均方误差
+            delta = reward + gamma * (1 - done) * pred_next_state_value - pred_state_value
             w += alpha * delta * phi
-
-            state_value = phi @ w
-            episode_state_value += state_value
-
+            
             state = next_state
-            phi = next_phi
-
+            phi = next_phi            
+            all_state_value += pred_state_value
+            
             step += 1
         
-        mean_state_value = episode_state_value / step
-
+        mean_state_value = all_state_value / step
         if ep % 10 == 0:
-            print(f"Epsisode {ep} | mean state value : {mean_state_value}")
+            print(f"Epsisode {ep} | mean state value : {mean_state_value:.3f}")
 
     return w
 
