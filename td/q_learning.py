@@ -30,7 +30,8 @@ env = GridWorld()
 #       s ← s'
 # ================================================================
 
-def q_learning(env, num_episodes=5000, alpha=0.1, gamma=0.9, epsilon_start=1.0, epsilon_end=0.05):
+def q_learning(env, num_episodes=5000,
+               alpha=0.1, gamma=0.9, epsilon_start=1.0, epsilon_end=0.05):
     num_states = env.num_states
     num_actions = len(env.action_space)
 
@@ -49,12 +50,15 @@ def q_learning(env, num_episodes=5000, alpha=0.1, gamma=0.9, epsilon_start=1.0, 
         
         step = 0
         done = False
+        episode_reward = 0
+
         while not done and step < 200:
             state_action_probs = epsilon_greedy(epsilon, Q, policy_matrix, state_idx)
             action_idx = np.random.choice(num_actions, p=state_action_probs)
             action = env.action_space[action_idx]
             
             next_state, reward, done, _ = env.step(action)
+            episode_reward += reward
             next_state_idx = state_to_index(next_state, env_size=env.env_size)
             
             # Q(s,a) ← Q(s,a) - α * [Q(s,a) - (r + γ * max_a' Q(s',·))]
@@ -65,11 +69,13 @@ def q_learning(env, num_episodes=5000, alpha=0.1, gamma=0.9, epsilon_start=1.0, 
             state_idx = next_state_idx
             step += 1
 
+        print(f"episode {ep} | mean reward: {episode_reward / step}")
+
     return Q, policy_matrix
 
 
 if __name__ == "__main__":
-    Q, best_policy = q_learning(env, num_episodes=500)
+    Q, best_policy = q_learning(env)
 
     state, _ = env.reset()
     env.render()
