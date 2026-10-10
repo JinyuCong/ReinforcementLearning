@@ -4,7 +4,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 from src.grid_world import GridWorld
-from td.utils import state_to_index
+from td.utils import state_to_index, epsilon_greedy
 
 env = GridWorld()
 
@@ -32,12 +32,6 @@ env = GridWorld()
 #       用 ε-greedy 更新 policy_matrix[s]
 #       s ← s'，用 ε-greedy 选下一个 a
 # ================================================================
-
-def epsilon_greedy(epsilon, Q, policy_matrix, state_idx):
-    num_actions = policy_matrix.shape[1]
-    state_action_probs = epsilon / (np.ones(num_actions) * num_actions)
-    state_action_probs[np.argmax(Q[state_idx])] += 1 - epsilon
-    return state_action_probs
 
 def expected_sarsa(env, num_episodes=5000, alpha=0.1, gamma=0.9, epsilon_start=1.0, epsilon_end=0.05):
     num_states = env.num_states
